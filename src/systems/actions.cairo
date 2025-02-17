@@ -26,6 +26,18 @@ pub mod actions {
         vrf_addr: ContractAddress,
     }
 
+    fn dojo_init(ref self: ContractState, vrf_addr: ContractAddress) {
+        let world = self.world_default();
+        let vrf_address = if vrf_addr.is_zero() {
+            let (vrf_mock_address, _) = world.dns(@"vrf_provider_mock").unwrap();
+            vrf_mock_address
+        } else {
+            vrf_addr
+        };
+
+        self.vrf_addr.write(vrf_address);
+    }
+
     #[generate_trait]
     impl WorldDefaultImpl of WorldDefaultTrait {
         fn world_default(self: @ContractState) -> WorldStorage {
@@ -35,26 +47,12 @@ pub mod actions {
         fn wordlib_dispatcher(
             self: @ContractState, world: @WorldStorage,
         ) -> WordSelectorLibraryDispatcher {
-            let (_, class_hash) = world.dns(@"wordlib_v0_1_0").expect('wordlib not found');
+            let (_, class_hash) = world.dns(@"word_v0_1_0").expect('wordlib not found');
 
             WordSelectorLibraryDispatcher { class_hash }
         }
         fn vrf_provider(ref self: ContractState, world: @WorldStorage) -> IVrfProviderDispatcher {
-            let (vrf_mock_address, _) = world.dns(@"vrf_provider_mock").unwrap();
-
-            IVrfProviderDispatcher { contract_address: vrf_mock_address }
-            //IVrfProviderDispatcher { contract_address: self.vrf_addr.read() }
-        }
-
-        fn dojo_init(ref self: ContractState, vrf_addr: ContractAddress) {
-            let world = self.world_default();
-            let vrf_address = if vrf_addr.is_zero() {
-                let (vrf_mock_address, _) = world.dns(@"vrf_provider_mock").unwrap();
-                vrf_mock_address
-            } else {
-                vrf_addr
-            };
-            self.vrf_addr.write(vrf_address);
+            IVrfProviderDispatcher { contract_address: self.vrf_addr.read() }
         }
     }
 
@@ -90,7 +88,8 @@ pub mod actions {
         fn attempt(ref self: ContractState, word: felt252) {
             let mut world = self.world_default();
             let mut game: Game = world.read_model(get_caller_address());
-            let random_word = self.wordlib_dispatcher(@world).get_word(1);
+            let mut config: Config = world.read_model(CONFIG_ID);
+            let random_word = self.wordlib_dispatcher(@world).get_word(config.word);
 
             assert(
                 wordle::ascii_to_string(word).len() == WORD_CHAR_COUNT,
@@ -100,7 +99,7 @@ pub mod actions {
                 game.attempts.len().try_into().unwrap() < MAX_ATTEMPTS, 'too many attempts today',
             );
 
-            let hint = wordle::get_hint_for_attempt('hello', word);
+            let hint = wordle::get_hint_for_attempt(random_word, word);
             let packed = wordle::pack_attempt(hint.span());
 
             game.attempts.append(Attempt { word: word, hint: packed });
@@ -135,7 +134,7 @@ mod tests {
                 TestResource::Model(m_Game::TEST_CLASS_HASH),
                 TestResource::Contract(actions::TEST_CLASS_HASH),
                 TestResource::Contract(vrf_provider_mock::TEST_CLASS_HASH),
-                TestResource::Library((word::TEST_CLASS_HASH, @"wordlib", @"0_1_0")),
+                TestResource::Library((word::TEST_CLASS_HASH, @"word", @"0_1_0")),
             ]
                 .span(),
         };
@@ -149,7 +148,7 @@ mod tests {
                 .with_writer_of([dojo::utils::bytearray_hash(@"wordle")].span()),
             ContractDefTrait::new(@"wordle", @"actions")
                 .with_writer_of([dojo::utils::bytearray_hash(@"wordle")].span())
-                .with_init_calldata([].span()),
+                .with_init_calldata([0x0].span()),
         ]
             .span()
     }
